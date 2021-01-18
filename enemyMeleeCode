@@ -1,0 +1,112 @@
+extends KinematicBody
+
+enum {
+	Idle,
+	Walk,
+	Attack,
+	Stun,
+	Dead,
+}
+
+export var velocity = Vector3(0,-5,0)
+export var MAX_SPEED = 0
+export var attackPoints = 10
+var health = 800
+var state = Walk
+var nav
+var path = []
+var pathInd = 0
+const radius = 1.5
+var inArea = false
+var diedOnce = false
+onready  var secTree = $enemTwo/AnimationTree
+
+func _ready():
+	state = Walk
+	nav = get_parent().get_parent()
+	$DeathTimer.connect("timeout",self,"die")
+	movetoplayer()
+
+func _process(delta):
+	if state != Attack and state != Stun:
+		if len(path) == 0:
+			state = Idle
+		else:
+			state = Walk
+	match state:
+		Idle:
+			secTree.set("parameters/Walking/blend_amount", 0)
+
+		Walk:
+			secTree.set("parameters/Walking/blend_amount", 1)
+
+		Attack:
+			secTree.set("parameters/Attack/active", true)
+
+		Stun:
+			secTree.set("parameters/Attack/active", false)
+			secTree.set("parameters/Stagger/active", true)
+		Dead:
+			secTree.set("parameters/dead/active", true)
+			secTree.set("parameters/Walking/blend_amount", 0)
+	if abs(self.global_transform.origin.distance_to(Global.player.global_transform.origin)) < radius and self.global_transform.origin.dot(Global.player.global_transform.origin) > .5:
+		state = Attack
+
+func die():
+	queue_free()
+
+func walk():
+	state = Walk
+
+func _physics_process(delta):
+	if !diedOnce:
+		if state == Walk and not diedOnce:
+			if pathInd < path.size():
+				if (path[pathInd] - self.global_transform.origin).length() < .1 :
+					pathInd += 1 
+				else:
+					var temp_velocity = Vector3()
+					var temp_rotaion = self.rotation.y
+					temp_velocity  = (path[pathInd] - self.global_transform.origin).normalized() * MAX_SPEED
+					velocity = temp_velocity.linear_interpolate(velocity, delta)
+					temp_rotaion = temp_rotaion + (-atan2(velocity.z,velocity.x) - temp_rotaion) * delta*10
+					self.rotation.y = temp_rotaion
+					velocity = move_and_slide(velocity,Vector3(0,1,0))
+		else:
+			state == Idle
+
+func movetoplayer():
+	if !diedOnce:
+		var tempPath = nav.get_simple_path(translation,nav.get_closest_point(Global.player.translation))
+		if len(tempPath) != 0:
+			pathInd = 0
+			path = tempPath
+
+	
+	
+func fireAtPlayer():
+	if !diedOnce:
+		if inArea:
+			Global.player.damage(attackPoints)
+		state = Walk
+
+func damage(amount,type = ""):
+	health -= amount
+	if amount >= 15 :
+		state = Stun
+	if health <= 0 and not diedOnce:
+
+		$CollisionShape.disabled = true
+
+		$DeathTimer.start()
+		secTree.set("parameters/dead/active", true)
+		state = Dead
+		diedOnce = true
+
+
+func _on_HurtBox_body_entered(body):
+	if body.name == 'Player':
+		inArea = true
+func _on_HurtBox_body_exited(body):
+	if body.name == 'Player':
+		inArea = false
